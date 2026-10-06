@@ -71,7 +71,9 @@ def main() -> None:
                     method, body = "PUT", {"text": read_multiline()}
                 elif command == "get":
                     method, path = "GET", text_path(input("name: "))
-                elif command in ("delete-user", "delete"):
+                elif command == "delete":
+                    method, path = "DELETE", text_path(input("name: "))
+                elif command == "delete-user":
                     print("This task is not implemented in the starting code yet.")
                     continue
                 else:

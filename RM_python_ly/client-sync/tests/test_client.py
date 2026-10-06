@@ -96,3 +96,24 @@ def test_get_request_has_no_body() -> None:
             200,
             {"data": "saved text"},
         )
+
+
+@pytest.mark.parametrize(
+    ("status", "result"),
+    [(200, {"data": None}), (404, {"message": "Text not found"})],
+)
+def test_delete_request_preserves_response(status: int, result: dict[str, object]) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/texts/note"
+        assert request.headers["Authorization"] == "Bearer example"
+        assert request.content == b""
+        return httpx.Response(status, json=result)
+
+    with httpx.Client(
+        base_url="http://localhost", transport=httpx.MockTransport(respond)
+    ) as client:
+        assert exchange(client, "DELETE", text_path("note"), token="example") == (
+            status,
+            result,
+        )
