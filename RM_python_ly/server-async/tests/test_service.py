@@ -1,7 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 
+import text_service.service as service_module
 from text_service.service import Service, route_error
 
 
@@ -155,6 +157,59 @@ def test_concurrent_text_overwrites_remain_complete() -> None:
         )
     assert statuses == [200] * len(values)
     assert service.handle("GET", "/texts/shared", None, auth)[1]["data"] in values
+
+
+def test_account_deletion_removes_token_and_texts() -> None:
+    service = Service()
+    account = {"username": "alice", "password": "password1"}
+    token = register_and_login(service)
+    auth = f"Bearer {token}"
+    assert service.handle("PUT", "/texts/note", {"text": "old"}, auth)[0] == 200
+    assert service.handle("DELETE", "/users/me", None, auth) == (200, {"data": None})
+    assert service.handle("GET", "/texts", None, auth)[0] == 401
+    assert service.handle("PUT", "/texts/note", {"text": "stale"}, auth)[0] == 401
+
+    assert service.handle("POST", "/users", account, "")[0] == 201
+    new_token = service.handle("POST", "/sessions", account, "")[1]["data"]["token"]
+    assert service.handle("GET", "/texts", None, f"Bearer {new_token}") == (200, {"data": []})
+
+
+def test_deletion_and_text_write_are_atomic() -> None:
+    service = Service()
+    token = register_and_login(service)
+    auth = f"Bearer {token}"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        delete = pool.submit(service.handle, "DELETE", "/users/me", None, auth)
+        write = pool.submit(service.handle, "PUT", "/texts/note", {"text": "value"}, auth)
+    assert delete.result()[0] == 200
+    assert write.result()[0] in (200, 401)
+    assert service.handle("GET", "/texts", None, auth)[0] == 401
+
+
+def test_stale_login_cannot_attach_to_reregistered_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = Service()
+    account = {"username": "alice", "password": "password1"}
+    token = register_and_login(service)
+    started = Event()
+    release = Event()
+    original_hash = service_module.hashlib.pbkdf2_hmac
+
+    def delayed_hash(hash_name: str, password: bytes, salt: bytes, iterations: int) -> bytes:
+        started.set()
+        assert release.wait(timeout=5)
+        return original_hash(hash_name, password, salt, iterations)
+
+    monkeypatch.setattr(service_module.hashlib, "pbkdf2_hmac", delayed_hash)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        old_login = pool.submit(service.handle, "POST", "/sessions", account, "")
+        assert started.wait(timeout=5)
+        monkeypatch.setattr(service_module.hashlib, "pbkdf2_hmac", original_hash)
+        assert service.handle("DELETE", "/users/me", None, f"Bearer {token}")[0] == 200
+        assert service.handle("POST", "/users", account, "")[0] == 201
+        release.set()
+    assert old_login.result()[0] == 401
 
 
 def test_concurrent_registration() -> None:

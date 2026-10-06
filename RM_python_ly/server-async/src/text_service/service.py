@@ -12,6 +12,7 @@ ROUTES = (
     ("GET", "/ping"),
     ("POST", "/echo"),
     ("POST", "/users"),
+    ("DELETE", "/users/me"),
     ("POST", "/sessions"),
     ("DELETE", "/sessions/current"),
     ("GET", "/texts"),
@@ -118,18 +119,31 @@ class Service:
             text = text_from_body(body)
             if isinstance(text, tuple):
                 return text
-        protected = path in ("/texts", "/sessions/current") or text_name is not None
+        protected = path in ("/texts", "/sessions/current", "/users/me") or text_name is not None
         if protected:
             token = (
                 authorization.removeprefix("Bearer ") if authorization.startswith("Bearer ") else ""
             )
             with self.lock:
-                user = next((u for u in self.users.values() if token and u.token == token), None)
-                if user is None:
+                identity = next(
+                    (
+                        (name, user)
+                        for name, user in self.users.items()
+                        if token and user.token == token
+                    ),
+                    None,
+                )
+                if identity is None:
                     return 401, {"message": "Login required"}
+                username, user = identity
                 # Later server task: check token expiry here, before reading or modifying state.
                 if path == "/sessions/current" and method == "DELETE":
                     user.token = None
+                    return 200, {"data": None}
+                if path == "/users/me" and method == "DELETE":
+                    user.token = None
+                    user.texts.clear()
+                    del self.users[username]
                     return 200, {"data": None}
                 if path == "/texts" and method == "GET":
                     return 200, {"data": sorted(user.texts)}
