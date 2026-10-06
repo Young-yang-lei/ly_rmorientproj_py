@@ -10,7 +10,10 @@ def exchange(
     client: httpx.Client, method: str, path: str, token: str = "", body: object = None
 ) -> tuple[int, Any]:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    response = client.request(method, path, json=body, headers=headers)
+    if body is None:
+        response = client.request(method, path, headers=headers)
+    else:
+        response = client.request(method, path, json=body, headers=headers)
     try:
         result = response.json()
     except ValueError:
@@ -34,6 +37,20 @@ def text_path(name: str) -> str:
 
 def should_clear_token(command: str, status: int) -> bool:
     return status == 401 or (command in ("logout", "delete-user") and status == 200)
+
+
+def login_token(result: Any) -> str:
+    if not isinstance(result, dict):
+        raise TypeError("Login response must be a JSON object")
+    data = result.get("data")
+    if not isinstance(data, dict):
+        raise TypeError("Login response is missing data")
+    token = data.get("token")
+    if not isinstance(token, str):
+        raise TypeError("Login response contains an invalid token")
+    if not token:
+        raise ValueError("Login response contains an invalid token")
+    return token
 
 
 def main() -> None:
@@ -86,12 +103,12 @@ def main() -> None:
                     status, result = exchange(client, method, path, token, body)
                     print(status, result)
                     if command == "login" and status == 200:
-                        token = result["data"]["token"]
+                        token = login_token(result)
                     if status == 401:
                         print("Please log in again.")
                     if should_clear_token(command, status):
                         token = ""
-                except (httpx.HTTPError, ValueError, KeyError) as exc:
+                except (httpx.HTTPError, TypeError, ValueError) as exc:
                     print(f"Request failed: {exc}")
         except (EOFError, KeyboardInterrupt):
             print()

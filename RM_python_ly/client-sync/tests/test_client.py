@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from text_service.client import exchange, read_multiline, should_clear_token, text_path
+from text_service.client import exchange, login_token, read_multiline, should_clear_token, text_path
 
 
 def test_request() -> None:
@@ -144,3 +144,41 @@ def test_successful_session_or_account_deletion_clears_token(command: str) -> No
 def test_failed_account_deletion_keeps_token() -> None:
     assert not should_clear_token("delete-user", 500)
     assert should_clear_token("delete-user", 401)
+
+
+def test_non_json_response_falls_back_to_text() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, text="upstream unavailable")
+
+    with httpx.Client(
+        base_url="http://localhost", transport=httpx.MockTransport(respond)
+    ) as client:
+        assert exchange(client, "GET", "/ping") == (
+            502,
+            {"message": "upstream unavailable"},
+        )
+
+
+def test_login_token() -> None:
+    assert login_token({"data": {"token": "example", "expires_in": 300}}) == "example"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [None, [], {}, {"data": None}, {"data": {}}, {"data": {"token": ""}}, {"data": {"token": 1}}],
+)
+def test_login_token_rejects_malformed_response(result: object) -> None:
+    with pytest.raises((TypeError, ValueError), match="Login response"):
+        login_token(result)
+
+
+@pytest.mark.parametrize("error", [EOFError(), KeyboardInterrupt()])
+def test_multiline_input_allows_normal_terminal_exit(
+    monkeypatch: pytest.MonkeyPatch, error: BaseException
+) -> None:
+    def stop() -> str:
+        raise error
+
+    monkeypatch.setattr("builtins.input", stop)
+    with pytest.raises(type(error)):
+        read_multiline()
