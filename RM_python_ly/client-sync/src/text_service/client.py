@@ -1,6 +1,7 @@
 import argparse
 import getpass
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -25,6 +26,10 @@ def read_multiline() -> str:
         if line == ".":
             return "\n".join(lines)
         lines.append("." if line == ".." else line)
+
+
+def text_path(name: str) -> str:
+    return f"/texts/{quote(name, safe='')}"
 
 
 def main() -> None:
@@ -60,7 +65,13 @@ def main() -> None:
                     print("text (enter . on its own line to finish; enter .. for a dot line):")
                     method, path = "POST", "/echo"
                     body = {"text": read_multiline()}
-                elif command in ("delete-user", "put", "get", "delete"):
+                elif command == "put":
+                    path = text_path(input("name: "))
+                    print("text (enter . on its own line to finish; enter .. for a dot line):")
+                    method, body = "PUT", {"text": read_multiline()}
+                elif command == "get":
+                    method, path = "GET", text_path(input("name: "))
+                elif command in ("delete-user", "delete"):
                     print("This task is not implemented in the starting code yet.")
                     continue
                 else:

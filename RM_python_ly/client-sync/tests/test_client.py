@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from text_service.client import exchange, read_multiline
+from text_service.client import exchange, read_multiline, text_path
 
 
 def test_request() -> None:
@@ -50,4 +50,49 @@ def test_echo_request() -> None:
         assert exchange(client, "POST", "/echo", body={"text": text}) == (
             200,
             {"data": text},
+        )
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [("note", "/texts/note"), ("a/b c", "/texts/a%2Fb%20c"), ("你好", "/texts/%E4%BD%A0%E5%A5%BD")],
+)
+def test_text_path_encodes_name_as_one_segment(name: str, expected: str) -> None:
+    assert text_path(name) == expected
+
+
+def test_put_request() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.url.raw_path == b"/texts/a%2Fb"
+        assert request.headers["Authorization"] == "Bearer example"
+        assert json.loads(request.content) == {"text": "new text"}
+        return httpx.Response(200, json={"data": None})
+
+    with httpx.Client(
+        base_url="http://localhost", transport=httpx.MockTransport(respond)
+    ) as client:
+        assert exchange(
+            client,
+            "PUT",
+            text_path("a/b"),
+            token="example",
+            body={"text": "new text"},
+        ) == (200, {"data": None})
+
+
+def test_get_request_has_no_body() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/texts/note"
+        assert request.headers["Authorization"] == "Bearer example"
+        assert request.content == b""
+        return httpx.Response(200, json={"data": "saved text"})
+
+    with httpx.Client(
+        base_url="http://localhost", transport=httpx.MockTransport(respond)
+    ) as client:
+        assert exchange(client, "GET", text_path("note"), token="example") == (
+            200,
+            {"data": "saved text"},
         )
