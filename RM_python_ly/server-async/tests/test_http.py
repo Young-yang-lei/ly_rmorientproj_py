@@ -24,7 +24,9 @@ async def client() -> AsyncGenerator[AsyncClient]:
 
 
 async def test_http_routes(client: AsyncClient) -> None:
-    assert (await client.get("/ping")).status_code == 200
+    ping = await client.get("/ping")
+    assert ping.status_code == 200
+    assert ping.json() == {"data": "pong"}
     response = await client.post("/users", json={"username": "alice", "password": "password1"})
     assert response.status_code == 201
     response = await client.post("/sessions", json={"username": "alice", "password": "password1"})
@@ -58,6 +60,13 @@ async def test_body_limit_and_routing(client: AsyncClient) -> None:
     assert (await client.get("/echo")).status_code == 404
     assert (await client.patch("/ping")).status_code == 405
     assert (await client.get("/ping?test=1")).json() == {"data": "pong"}
+
+
+async def test_failed_request_does_not_break_later_requests(client: AsyncClient) -> None:
+    assert (await client.post("/users", content=b"not JSON")).status_code == 400
+    response = await client.get("/ping")
+    assert response.status_code == 200
+    assert response.json() == {"data": "pong"}
 
 
 @pytest.mark.parametrize(
