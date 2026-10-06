@@ -5,7 +5,9 @@ import hmac
 import re
 import secrets
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from time import monotonic
 from typing import Any
 
 ROUTES = (
@@ -55,13 +57,20 @@ class User:
     salt: bytes
     digest: bytes
     token: str | None = None
+    token_deadline: float | None = None
     texts: dict[str, str] = field(default_factory=dict)
 
 
 class Service:
-    def __init__(self) -> None:
+    def __init__(
+        self, token_ttl_seconds: int = 300, clock: Callable[[], float] = monotonic
+    ) -> None:
+        if token_ttl_seconds <= 0:
+            raise ValueError("token_ttl_seconds must be positive")
         self.users: dict[str, User] = {}
         self.lock = threading.Lock()
+        self.token_ttl_seconds = token_ttl_seconds
+        self.clock = clock
 
     def handle(
         self, method: str, path: str, body: Any, authorization: str
@@ -112,8 +121,8 @@ class Service:
                 if self.users.get(name) is not user or not hmac.compare_digest(digest, expected):
                     return 401, {"message": "Invalid username or password"}
                 user.token = secrets.token_urlsafe(32)
-                # Later server task: record a deadline and return expires_in.
-                return 200, {"data": {"token": user.token}}
+                user.token_deadline = self.clock() + self.token_ttl_seconds
+                return 200, {"data": {"token": user.token, "expires_in": self.token_ttl_seconds}}
         text = None
         if text_name is not None and method == "PUT":
             text = text_from_body(body)
@@ -136,12 +145,17 @@ class Service:
                 if identity is None:
                     return 401, {"message": "Login required"}
                 username, user = identity
-                # Later server task: check token expiry here, before reading or modifying state.
+                if user.token_deadline is None or self.clock() >= user.token_deadline:
+                    user.token = None
+                    user.token_deadline = None
+                    return 401, {"message": "Login required"}
                 if path == "/sessions/current" and method == "DELETE":
                     user.token = None
+                    user.token_deadline = None
                     return 200, {"data": None}
                 if path == "/users/me" and method == "DELETE":
                     user.token = None
+                    user.token_deadline = None
                     user.texts.clear()
                     del self.users[username]
                     return 200, {"data": None}

@@ -212,6 +212,37 @@ def test_stale_login_cannot_attach_to_reregistered_account(
     assert old_login.result()[0] == 401
 
 
+def test_token_expiration_is_fixed_and_relogin_issues_new_token() -> None:
+    now = [100.0]
+    service = Service(token_ttl_seconds=5, clock=lambda: now[0])
+    account = {"username": "alice", "password": "password1"}
+    assert service.handle("POST", "/users", account, "")[0] == 201
+    login = service.handle("POST", "/sessions", account, "")
+    token = login[1]["data"]["token"]
+    auth = f"Bearer {token}"
+    assert login == (200, {"data": {"token": token, "expires_in": 5}})
+
+    assert service.handle("PUT", "/texts/note", {"text": "value"}, auth)[0] == 200
+    now[0] = 104.999
+    assert service.handle("GET", "/texts/note", None, auth)[0] == 200
+    now[0] = 105.0
+    assert service.handle("GET", "/texts", None, auth)[0] == 401
+    assert service.handle("DELETE", "/sessions/current", None, auth)[0] == 401
+    assert service.handle("DELETE", "/users/me", None, auth)[0] == 401
+
+    next_login = service.handle("POST", "/sessions", account, "")
+    next_token = next_login[1]["data"]["token"]
+    assert next_token != token
+    assert service.handle("GET", "/texts", None, f"Bearer {next_token}")[0] == 200
+    assert service.handle("GET", "/texts", None, auth)[0] == 401
+
+
+@pytest.mark.parametrize("ttl", [0, -1])
+def test_token_ttl_must_be_positive(ttl: int) -> None:
+    with pytest.raises(ValueError, match="positive"):
+        Service(token_ttl_seconds=ttl)
+
+
 def test_concurrent_registration() -> None:
     service = Service()
     body = {"username": "alice", "password": "password1"}

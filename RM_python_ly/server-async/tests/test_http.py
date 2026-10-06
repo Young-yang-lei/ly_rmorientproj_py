@@ -1,9 +1,10 @@
+import argparse
 from collections.abc import AsyncGenerator
 
 import pytest
 from httpx2 import ASGITransport, AsyncClient
 
-from text_service.server import create_app
+from text_service.server import create_app, positive_int
 
 pytestmark = pytest.mark.anyio
 
@@ -30,6 +31,7 @@ async def test_http_routes(client: AsyncClient) -> None:
     response = await client.post("/users", json={"username": "alice", "password": "password1"})
     assert response.status_code == 201
     response = await client.post("/sessions", json={"username": "alice", "password": "password1"})
+    assert response.json()["data"]["expires_in"] == 300
     token = response.json()["data"]["token"]
     assert (
         await client.get("/texts", headers={"Authorization": f"Bearer {token}"})
@@ -141,3 +143,26 @@ async def test_account_deletion_invalidates_token_and_removes_texts(client: Asyn
     login = await client.post("/sessions", json=account)
     headers = {"Authorization": f"Bearer {login.json()['data']['token']}"}
     assert (await client.get("/texts", headers=headers)).json() == {"data": []}
+
+
+async def test_configured_token_ttl_is_returned() -> None:
+    app = create_app(token_ttl_seconds=17)
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client,
+    ):
+        account = {"username": "alice", "password": "password1"}
+        assert (await client.post("/users", json=account)).status_code == 201
+        response = await client.post("/sessions", json=account)
+        assert response.json()["data"]["expires_in"] == 17
+
+
+@pytest.mark.parametrize(("value", "expected"), [("1", 1), ("300", 300)])
+def test_positive_int(value: str, expected: int) -> None:
+    assert positive_int(value) == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "not-an-integer"])
+def test_positive_int_rejects_invalid_values(value: str) -> None:
+    with pytest.raises(argparse.ArgumentTypeError):
+        positive_int(value)
