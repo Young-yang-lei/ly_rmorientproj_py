@@ -57,7 +57,7 @@ async def test_body_limit_and_routing(client: AsyncClient) -> None:
     assert (await client.post("/users", content=exact)).status_code == 400
     assert (await client.post("/users", content=exact + b" ")).status_code == 413
     assert (await client.get("/missing")).status_code == 404
-    assert (await client.get("/echo")).status_code == 404
+    assert (await client.get("/echo")).status_code == 405
     assert (await client.patch("/ping")).status_code == 405
     assert (await client.get("/ping?test=1")).json() == {"data": "pong"}
 
@@ -72,7 +72,6 @@ async def test_failed_request_does_not_break_later_requests(client: AsyncClient)
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        ("POST", "/echo"),
         ("DELETE", "/users/me"),
         ("PUT", "/texts/note"),
         ("GET", "/texts/note"),
@@ -86,3 +85,15 @@ async def test_unimplemented_routes_are_absent(client: AsyncClient, method: str,
 @pytest.mark.parametrize("path", ["/ping", "/users", "/sessions", "/sessions/current", "/texts"])
 async def test_wrong_method_precedes_authentication(client: AsyncClient, path: str) -> None:
     assert (await client.patch(path)).status_code == 405
+
+
+@pytest.mark.parametrize("text", ["", "你好\nRM", "😀" * 16_384])
+async def test_echo(client: AsyncClient, text: str) -> None:
+    response = await client.post("/echo", json={"text": text})
+    assert response.status_code == 200
+    assert response.json() == {"data": text}
+
+
+async def test_echo_text_size_limit(client: AsyncClient) -> None:
+    assert (await client.post("/echo", json={"text": "x" * 65_536})).status_code == 200
+    assert (await client.post("/echo", json={"text": "x" * 65_537})).status_code == 413

@@ -39,6 +39,29 @@ def test_unknown_user_and_missing_authentication() -> None:
     assert service.handle("DELETE", "/sessions/current", None, "Bearer invalid")[0] == 401
 
 
+@pytest.mark.parametrize("text", ["", "plain text", "你好\nRM", "x" * 65_536, "😀" * 16_384])
+def test_echo(text: str) -> None:
+    service = Service()
+    assert service.handle("POST", "/echo", {"text": text}, "") == (200, {"data": text})
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (None, 400),
+        ([], 400),
+        ({}, 400),
+        ({"text": "ok", "extra": True}, 400),
+        ({"text": 1}, 400),
+        ({"text": "\ud800"}, 400),
+        ({"text": "x" * 65_537}, 413),
+        ({"text": "😀" * 16_385}, 413),
+    ],
+)
+def test_echo_validation(body: object, expected: int) -> None:
+    assert Service().handle("POST", "/echo", body, "")[0] == expected
+
+
 @pytest.mark.parametrize(
     ("method", "path", "expected"),
     [

@@ -10,11 +10,14 @@ from typing import Any
 
 ROUTES = (
     ("GET", "/ping"),
+    ("POST", "/echo"),
     ("POST", "/users"),
     ("POST", "/sessions"),
     ("DELETE", "/sessions/current"),
     ("GET", "/texts"),
 )
+
+TEXT_MAX_BYTES = 65_536
 
 
 def route_error(method: str, path: str) -> int | None:
@@ -22,6 +25,21 @@ def route_error(method: str, path: str) -> int | None:
     if allowed is None:
         return 404
     return None if method == allowed else 405
+
+
+def text_from_body(body: Any) -> str | tuple[int, dict[str, Any]]:
+    if not isinstance(body, dict) or set(body) != {"text"}:
+        return 400, {"message": "Expected text"}
+    text = body["text"]
+    if not isinstance(text, str):
+        return 400, {"message": "text must be a string"}
+    try:
+        encoded = text.encode("utf-8")
+    except UnicodeError:
+        return 400, {"message": "text must be valid Unicode"}
+    if len(encoded) > TEXT_MAX_BYTES:
+        return 413, {"message": "text is too large"}
+    return text
 
 
 @dataclass
@@ -44,6 +62,11 @@ class Service:
             return status, {"message": "Not found" if status == 404 else "Method not allowed"}
         if method == "GET" and path == "/ping":
             return 200, {"data": "pong"}
+        if method == "POST" and path == "/echo":
+            text = text_from_body(body)
+            if isinstance(text, tuple):
+                return text
+            return 200, {"data": text}
         if path in ("/users", "/sessions") and method == "POST":
             if not isinstance(body, dict) or set(body) != {"username", "password"}:
                 return 400, {"message": "Expected username and password"}
