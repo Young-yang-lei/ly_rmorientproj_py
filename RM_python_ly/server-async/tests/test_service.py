@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from text_service.service import Service, route_error
@@ -115,9 +117,47 @@ def test_users_can_store_different_text_under_same_name() -> None:
     assert service.handle("GET", "/texts/note", None, bob)[1] == {"data": "bob text"}
 
 
-def test_concurrent_registration() -> None:
-    from concurrent.futures import ThreadPoolExecutor
+def test_delete_text_and_sorted_list() -> None:
+    service = Service()
+    auth = f"Bearer {register_and_login(service)}"
+    for name in ("zeta", "alpha", "middle"):
+        assert service.handle("PUT", f"/texts/{name}", {"text": name}, auth)[0] == 200
+    assert service.handle("GET", "/texts", None, auth) == (
+        200,
+        {"data": ["alpha", "middle", "zeta"]},
+    )
+    assert service.handle("DELETE", "/texts/middle", None, auth) == (200, {"data": None})
+    assert service.handle("GET", "/texts", None, auth)[1] == {"data": ["alpha", "zeta"]}
+    assert service.handle("DELETE", "/texts/middle", None, auth)[0] == 404
 
+
+def test_user_cannot_read_list_or_delete_another_users_text() -> None:
+    service = Service()
+    alice = f"Bearer {register_and_login(service, 'alice')}"
+    bob = f"Bearer {register_and_login(service, 'bob')}"
+    assert service.handle("PUT", "/texts/private", {"text": "secret"}, alice)[0] == 200
+    assert service.handle("GET", "/texts", None, bob) == (200, {"data": []})
+    assert service.handle("GET", "/texts/private", None, bob)[0] == 404
+    assert service.handle("DELETE", "/texts/private", None, bob)[0] == 404
+    assert service.handle("GET", "/texts/private", None, alice)[1] == {"data": "secret"}
+
+
+def test_concurrent_text_overwrites_remain_complete() -> None:
+    service = Service()
+    auth = f"Bearer {register_and_login(service)}"
+    values = [f"value-{index}-" + "x" * 1_000 for index in range(16)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        statuses = list(
+            pool.map(
+                lambda value: service.handle("PUT", "/texts/shared", {"text": value}, auth)[0],
+                values,
+            )
+        )
+    assert statuses == [200] * len(values)
+    assert service.handle("GET", "/texts/shared", None, auth)[1]["data"] in values
+
+
+def test_concurrent_registration() -> None:
     service = Service()
     body = {"username": "alice", "password": "password1"}
     with ThreadPoolExecutor(max_workers=4) as pool:

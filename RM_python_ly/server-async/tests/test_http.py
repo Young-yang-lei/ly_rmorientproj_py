@@ -118,4 +118,19 @@ async def test_text_write_and_read(client: AsyncClient) -> None:
 
 async def test_text_routes_reject_wrong_method(client: AsyncClient) -> None:
     assert (await client.post("/texts/note", json={"text": "value"})).status_code == 405
-    assert (await client.delete("/texts/note")).status_code == 405
+
+
+async def test_text_list_and_delete(client: AsyncClient) -> None:
+    account = {"username": "alice", "password": "password1"}
+    assert (await client.post("/users", json=account)).status_code == 201
+    login = await client.post("/sessions", json=account)
+    headers = {"Authorization": f"Bearer {login.json()['data']['token']}"}
+
+    for name in ("zeta", "alpha"):
+        assert (
+            await client.put(f"/texts/{name}", json={"text": name}, headers=headers)
+        ).status_code == 200
+    assert (await client.get("/texts", headers=headers)).json() == {"data": ["alpha", "zeta"]}
+    assert (await client.delete("/texts/alpha", headers=headers)).status_code == 200
+    assert (await client.get("/texts", headers=headers)).json() == {"data": ["zeta"]}
+    assert (await client.delete("/texts/alpha", headers=headers)).status_code == 404

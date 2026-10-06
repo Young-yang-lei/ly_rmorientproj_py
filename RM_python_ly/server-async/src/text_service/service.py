@@ -17,6 +17,7 @@ ROUTES = (
     ("GET", "/texts"),
     ("PUT", "/texts/{name}"),
     ("GET", "/texts/{name}"),
+    ("DELETE", "/texts/{name}"),
 )
 
 TEXT_MAX_BYTES = 65_536
@@ -141,4 +142,9 @@ class Service:
                     if saved is None:
                         return 404, {"message": "Text not found"}
                     return 200, {"data": saved}
+                if text_name is not None and method == "DELETE":
+                    if text_name not in user.texts:
+                        return 404, {"message": "Text not found"}
+                    del user.texts[text_name]
+                    return 200, {"data": None}
         return 404, {"message": "Not found"}
