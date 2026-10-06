@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from text_service.client import exchange, read_multiline, text_path
+from text_service.client import exchange, read_multiline, should_clear_token, text_path
 
 
 def test_request() -> None:
@@ -117,3 +117,30 @@ def test_delete_request_preserves_response(status: int, result: dict[str, object
             status,
             result,
         )
+
+
+def test_delete_user_request() -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/users/me"
+        assert request.headers["Authorization"] == "Bearer example"
+        assert request.content == b""
+        return httpx.Response(200, json={"data": None})
+
+    with httpx.Client(
+        base_url="http://localhost", transport=httpx.MockTransport(respond)
+    ) as client:
+        assert exchange(client, "DELETE", "/users/me", token="example") == (
+            200,
+            {"data": None},
+        )
+
+
+@pytest.mark.parametrize("command", ["logout", "delete-user"])
+def test_successful_session_or_account_deletion_clears_token(command: str) -> None:
+    assert should_clear_token(command, 200)
+
+
+def test_failed_account_deletion_keeps_token() -> None:
+    assert not should_clear_token("delete-user", 500)
+    assert should_clear_token("delete-user", 401)

@@ -32,6 +32,10 @@ def text_path(name: str) -> str:
     return f"/texts/{quote(name, safe='')}"
 
 
+def should_clear_token(command: str, status: int) -> bool:
+    return status == 401 or (command in ("logout", "delete-user") and status == 200)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:7878")
@@ -74,8 +78,7 @@ def main() -> None:
                 elif command == "delete":
                     method, path = "DELETE", text_path(input("name: "))
                 elif command == "delete-user":
-                    print("This task is not implemented in the starting code yet.")
-                    continue
+                    method, path = "DELETE", "/users/me"
                 else:
                     print("Unknown command.")
                     continue
@@ -86,7 +89,7 @@ def main() -> None:
                         token = result["data"]["token"]
                     if status == 401:
                         print("Please log in again.")
-                    if status == 401 or (command == "logout" and status == 200):
+                    if should_clear_token(command, status):
                         token = ""
                 except (httpx.HTTPError, ValueError, KeyError) as exc:
                     print(f"Request failed: {exc}")
