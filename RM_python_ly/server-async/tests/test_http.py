@@ -1,10 +1,14 @@
 import argparse
+import asyncio
 from collections.abc import AsyncGenerator
+from threading import Event
+from typing import Any
 
 import pytest
 from httpx2 import ASGITransport, AsyncClient
 
 from text_service.server import create_app, positive_int
+from text_service.service import Service
 
 pytestmark = pytest.mark.anyio
 
@@ -110,6 +114,8 @@ async def test_text_write_and_read(client: AsyncClient) -> None:
 
 async def test_text_routes_reject_wrong_method(client: AsyncClient) -> None:
     assert (await client.post("/texts/note", json={"text": "value"})).status_code == 405
+    assert (await client.delete("/echo")).status_code == 405
+    assert (await client.post("/texts", json={})).status_code == 405
 
 
 async def test_text_list_and_delete(client: AsyncClient) -> None:
@@ -155,6 +161,45 @@ async def test_configured_token_ttl_is_returned() -> None:
         assert (await client.post("/users", json=account)).status_code == 201
         response = await client.post("/sessions", json=account)
         assert response.json()["data"]["expires_in"] == 17
+
+
+async def test_concurrent_http_registration_has_one_winner(client: AsyncClient) -> None:
+    account = {"username": "alice", "password": "password1"}
+    responses = await asyncio.gather(*(client.post("/users", json=account) for _ in range(4)))
+    assert sorted(response.status_code for response in responses) == [201, 409, 409, 409]
+
+
+async def test_blocking_service_work_does_not_block_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = Event()
+    release = Event()
+    original_handle = Service.handle
+
+    def delayed_handle(
+        self: Service, method: str, path: str, body: Any, authorization: str
+    ) -> tuple[int, dict[str, Any]]:
+        if method == "POST" and path == "/users":
+            started.set()
+            assert release.wait(timeout=5)
+        return original_handle(self, method, path, body, authorization)
+
+    monkeypatch.setattr(Service, "handle", delayed_handle)
+    app = create_app()
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as local_client,
+    ):
+        registration = asyncio.create_task(
+            local_client.post("/users", json={"username": "alice", "password": "password1"})
+        )
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            response = await asyncio.wait_for(local_client.get("/ping"), timeout=1)
+            assert response.status_code == 200
+        finally:
+            release.set()
+        assert (await registration).status_code == 201
 
 
 @pytest.mark.parametrize(("value", "expected"), [("1", 1), ("300", 300)])

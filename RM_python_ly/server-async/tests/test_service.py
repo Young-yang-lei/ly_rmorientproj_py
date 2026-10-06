@@ -35,10 +35,32 @@ def test_validation() -> None:
         None,
         [],
         {},
+        {"username": "alice"},
+        {"username": "alice", "password": "password1", "extra": True},
         {"username": True, "password": "password1"},
+        {"username": "", "password": "password1"},
+        {"username": "a" * 33, "password": "password1"},
         {"username": "a/b", "password": "password1"},
+        {"username": "alice", "password": True},
+        {"username": "alice", "password": "x" * 7},
+        {"username": "alice", "password": "x" * 129},
+        {"username": "alice", "password": "\ud800" * 8},
     ):
         assert service.handle("POST", "/users", body, "")[0] == 400
+        assert service.handle("POST", "/sessions", body, "")[0] == 400
+
+
+@pytest.mark.parametrize(
+    "account",
+    [
+        {"username": "a", "password": "😀" * 8},
+        {"username": "a" * 32, "password": "x" * 128},
+    ],
+)
+def test_account_field_boundaries_are_accepted(account: dict[str, str]) -> None:
+    service = Service()
+    assert service.handle("POST", "/users", account, "")[0] == 201
+    assert service.handle("POST", "/sessions", account, "")[0] == 200
 
 
 def test_unknown_user_and_missing_authentication() -> None:
@@ -107,6 +129,23 @@ def test_text_read_and_write_validation() -> None:
     assert service.handle("PUT", "/texts/note", {"text": 1}, auth)[0] == 400
     assert service.handle("PUT", "/texts/note", {"text": "x" * 65_537}, auth)[0] == 413
     assert service.handle("GET", "/texts/note", None, "Bearer invalid")[0] == 401
+
+
+@pytest.mark.parametrize("name", ["", "a" * 65, "bad.name", "a/b", "你好"])
+def test_invalid_text_names(name: str) -> None:
+    service = Service()
+    auth = f"Bearer {register_and_login(service)}"
+    assert service.handle("PUT", f"/texts/{name}", {"text": "value"}, auth)[0] == 400
+    assert service.handle("GET", f"/texts/{name}", None, auth)[0] == 400
+    assert service.handle("DELETE", f"/texts/{name}", None, auth)[0] == 400
+
+
+def test_text_name_length_boundary_is_accepted() -> None:
+    service = Service()
+    auth = f"Bearer {register_and_login(service)}"
+    name = "a" * 64
+    assert service.handle("PUT", f"/texts/{name}", {"text": "value"}, auth)[0] == 200
+    assert service.handle("GET", f"/texts/{name}", None, auth)[1] == {"data": "value"}
 
 
 def test_users_can_store_different_text_under_same_name() -> None:
@@ -235,6 +274,21 @@ def test_token_expiration_is_fixed_and_relogin_issues_new_token() -> None:
     assert next_token != token
     assert service.handle("GET", "/texts", None, f"Bearer {next_token}")[0] == 200
     assert service.handle("GET", "/texts", None, auth)[0] == 401
+
+
+def test_concurrent_logins_leave_exactly_one_valid_token() -> None:
+    service = Service()
+    account = {"username": "alice", "password": "password1"}
+    assert service.handle("POST", "/users", account, "")[0] == 201
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        logins = list(
+            pool.map(lambda _: service.handle("POST", "/sessions", account, ""), range(4))
+        )
+    tokens = [result[1]["data"]["token"] for result in logins]
+    assert len(set(tokens)) == 4
+    statuses = [service.handle("GET", "/texts", None, f"Bearer {token}")[0] for token in tokens]
+    assert statuses.count(200) == 1
+    assert statuses.count(401) == 3
 
 
 @pytest.mark.parametrize("ttl", [0, -1])
