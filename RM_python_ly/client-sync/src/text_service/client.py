@@ -16,9 +16,16 @@ def exchange(
         result = {"message": response.text}
     return response.status_code, result
 
-#def read_multiline()-> str:
-    
-    
+
+def read_multiline() -> str:
+    """Read lines until a single dot; two dots represent a literal dot line."""
+    lines: list[str] = []
+    while True:
+        line = input()
+        if line == ".":
+            return "\n".join(lines)
+        lines.append("." if line == ".." else line)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -49,9 +56,12 @@ def main() -> None:
                         "logout": ("DELETE", "/sessions/current"),
                         "list": ("GET", "/texts"),
                     }[command]
-                elif command in ("echo", "delete-user", "put", "get", "delete"):
+                elif command == "echo":
+                    print("text (enter . on its own line to finish; enter .. for a dot line):")
+                    method, path = "POST", "/echo"
+                    body = {"text": read_multiline()}
+                elif command in ("delete-user", "put", "get", "delete"):
                     print("This task is not implemented in the starting code yet.")
-                    
                     continue
                 else:
                     print("Unknown command.")
