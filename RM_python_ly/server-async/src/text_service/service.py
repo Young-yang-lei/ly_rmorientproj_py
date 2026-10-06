@@ -15,16 +15,22 @@ ROUTES = (
     ("POST", "/sessions"),
     ("DELETE", "/sessions/current"),
     ("GET", "/texts"),
+    ("PUT", "/texts/{name}"),
+    ("GET", "/texts/{name}"),
 )
 
 TEXT_MAX_BYTES = 65_536
 
 
 def route_error(method: str, path: str) -> int | None:
-    allowed = next((verb for verb, route in ROUTES if route == path), None)
-    if allowed is None:
+    allowed = {
+        verb
+        for verb, route in ROUTES
+        if route == path or (route == "/texts/{name}" and path.startswith("/texts/"))
+    }
+    if not allowed:
         return 404
-    return None if method == allowed else 405
+    return None if method in allowed else 405
 
 
 def text_from_body(body: Any) -> str | tuple[int, dict[str, Any]]:
@@ -67,6 +73,9 @@ class Service:
             if isinstance(text, tuple):
                 return text
             return 200, {"data": text}
+        text_name = path.removeprefix("/texts/") if path.startswith("/texts/") else None
+        if text_name is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", text_name):
+            return 400, {"message": "Invalid text name"}
         if path in ("/users", "/sessions") and method == "POST":
             if not isinstance(body, dict) or set(body) != {"username", "password"}:
                 return 400, {"message": "Expected username and password"}
@@ -103,7 +112,12 @@ class Service:
                 user.token = secrets.token_urlsafe(32)
                 # Later server task: record a deadline and return expires_in.
                 return 200, {"data": {"token": user.token}}
-        protected = path in ("/texts", "/sessions/current")
+        text = None
+        if text_name is not None and method == "PUT":
+            text = text_from_body(body)
+            if isinstance(text, tuple):
+                return text
+        protected = path in ("/texts", "/sessions/current") or text_name is not None
         if protected:
             token = (
                 authorization.removeprefix("Bearer ") if authorization.startswith("Bearer ") else ""
@@ -118,4 +132,13 @@ class Service:
                     return 200, {"data": None}
                 if path == "/texts" and method == "GET":
                     return 200, {"data": sorted(user.texts)}
+                if text_name is not None and method == "PUT":
+                    assert isinstance(text, str)
+                    user.texts[text_name] = text
+                    return 200, {"data": None}
+                if text_name is not None and method == "GET":
+                    saved = user.texts.get(text_name)
+                    if saved is None:
+                        return 404, {"message": "Text not found"}
+                    return 200, {"data": saved}
         return 404, {"message": "Not found"}

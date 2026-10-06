@@ -3,6 +3,12 @@ import pytest
 from text_service.service import Service, route_error
 
 
+def register_and_login(service: Service, username: str = "alice") -> str:
+    account = {"username": username, "password": "password1"}
+    assert service.handle("POST", "/users", account, "")[0] == 201
+    return service.handle("POST", "/sessions", account, "")[1]["data"]["token"]
+
+
 def test_account_lifecycle() -> None:
     service = Service()
     account = {"username": "alice", "password": "password1"}
@@ -73,6 +79,40 @@ def test_echo_validation(body: object, expected: int) -> None:
 )
 def test_route_errors(method: str, path: str, expected: int) -> None:
     assert route_error(method, path) == expected
+
+
+def test_write_read_and_overwrite_text() -> None:
+    service = Service()
+    token = register_and_login(service)
+    auth = f"Bearer {token}"
+    assert service.handle("PUT", "/texts/note", {"text": "first"}, auth) == (
+        200,
+        {"data": None},
+    )
+    assert service.handle("GET", "/texts/note", None, auth) == (200, {"data": "first"})
+    assert service.handle("PUT", "/texts/note", {"text": ""}, auth)[0] == 200
+    assert service.handle("GET", "/texts/note", None, auth) == (200, {"data": ""})
+
+
+def test_text_read_and_write_validation() -> None:
+    service = Service()
+    token = register_and_login(service)
+    auth = f"Bearer {token}"
+    assert service.handle("GET", "/texts/missing", None, auth)[0] == 404
+    assert service.handle("GET", "/texts/bad.name", None, auth)[0] == 400
+    assert service.handle("PUT", "/texts/note", {"text": 1}, auth)[0] == 400
+    assert service.handle("PUT", "/texts/note", {"text": "x" * 65_537}, auth)[0] == 413
+    assert service.handle("GET", "/texts/note", None, "Bearer invalid")[0] == 401
+
+
+def test_users_can_store_different_text_under_same_name() -> None:
+    service = Service()
+    alice = f"Bearer {register_and_login(service, 'alice')}"
+    bob = f"Bearer {register_and_login(service, 'bob')}"
+    assert service.handle("PUT", "/texts/note", {"text": "alice text"}, alice)[0] == 200
+    assert service.handle("PUT", "/texts/note", {"text": "bob text"}, bob)[0] == 200
+    assert service.handle("GET", "/texts/note", None, alice)[1] == {"data": "alice text"}
+    assert service.handle("GET", "/texts/note", None, bob)[1] == {"data": "bob text"}
 
 
 def test_concurrent_registration() -> None:

@@ -73,9 +73,6 @@ async def test_failed_request_does_not_break_later_requests(client: AsyncClient)
     ("method", "path"),
     [
         ("DELETE", "/users/me"),
-        ("PUT", "/texts/note"),
-        ("GET", "/texts/note"),
-        ("DELETE", "/texts/note"),
     ],
 )
 async def test_unimplemented_routes_are_absent(client: AsyncClient, method: str, path: str) -> None:
@@ -97,3 +94,28 @@ async def test_echo(client: AsyncClient, text: str) -> None:
 async def test_echo_text_size_limit(client: AsyncClient) -> None:
     assert (await client.post("/echo", json={"text": "x" * 65_536})).status_code == 200
     assert (await client.post("/echo", json={"text": "x" * 65_537})).status_code == 413
+
+
+async def test_text_write_and_read(client: AsyncClient) -> None:
+    account = {"username": "alice", "password": "password1"}
+    assert (await client.post("/users", json=account)).status_code == 201
+    login = await client.post("/sessions", json=account)
+    headers = {"Authorization": f"Bearer {login.json()['data']['token']}"}
+
+    assert (
+        await client.put("/texts/note", json={"text": "first"}, headers=headers)
+    ).status_code == 200
+    response = await client.get("/texts/note", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"data": "first"}
+
+    assert (
+        await client.put("/texts/note", json={"text": "second"}, headers=headers)
+    ).status_code == 200
+    assert (await client.get("/texts/note", headers=headers)).json() == {"data": "second"}
+    assert (await client.get("/texts/missing", headers=headers)).status_code == 404
+
+
+async def test_text_routes_reject_wrong_method(client: AsyncClient) -> None:
+    assert (await client.post("/texts/note", json={"text": "value"})).status_code == 405
+    assert (await client.delete("/texts/note")).status_code == 405
