@@ -1,8 +1,8 @@
-**/.venv/          
-**/__pycache__/    
-**/.pytest_cache/  
-**/.ruff_cache/    
-*.pyc              
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+*.pyc
 *.exe
 *.zip
 *.tar.gz
@@ -10,6 +10,12 @@
 .DS_Store
 .vscode/
 .idea/
+/RM_python_ly/server-sync/
+/common/
+/RM_python_ly/learning.md
+/RM_python_ly/README.md
+/RM_python_ly/client-sync/README.md
+/RM_python_ly/server-async/README.md
 
 # Local-only build output.
 .reference-build/
