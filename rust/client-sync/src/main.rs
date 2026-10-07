@@ -51,7 +51,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                 )
             }
-            "echo" | "delete-user" | "put" | "get" | "delete" => {
+            "echo" => {
+                let stdin = io::stdin();
+                let stdout = io::stdout();
+                body = json!({"text": rm_client_sync::read_multiline(
+                    &mut stdin.lock(),
+                    &mut stdout.lock(),
+                )?});
+                ("POST", "/echo")
+            }
+            "delete-user" | "put" | "get" | "delete" => {
                 println!("This task is not implemented in the starting code yet.");
                 continue;
             }
