@@ -70,6 +70,9 @@ def main() -> None:
                 body = None
                 if command == "q":
                     break
+                if command == "login" and token:
+                    print("Already logged in. Please log out before logging in again.")
+                    continue
                 if command in ("register", "login"):
                     body = {
                         "username": input("username: "),

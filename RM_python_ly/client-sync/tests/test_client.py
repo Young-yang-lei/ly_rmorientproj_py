@@ -1,8 +1,10 @@
 import json
+from typing import Self
 
 import httpx
 import pytest
 
+from text_service import client as client_module
 from text_service.client import exchange, login_token, read_multiline, should_clear_token, text_path
 
 
@@ -161,6 +163,46 @@ def test_non_json_response_falls_back_to_text() -> None:
 
 def test_login_token() -> None:
     assert login_token({"data": {"token": "example", "expires_in": 300}}) == "example"
+
+
+def test_login_requires_logout_before_another_login(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+    entered = iter(["login", "alice", "login", "q"])
+    requests: list[tuple[str, str, str, object]] = []
+    password_prompts: list[str] = []
+
+    def fake_exchange(
+        client: object, method: str, path: str, token: str = "", body: object = None
+    ) -> tuple[int, object]:
+        requests.append((method, path, token, body))
+        return 200, {"data": {"token": "example", "expires_in": 300}}
+
+    def fake_getpass(prompt: str) -> str:
+        password_prompts.append(prompt)
+        return "password1"
+
+    monkeypatch.setattr("sys.argv", ["rm-client"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(entered))
+    monkeypatch.setattr(client_module.getpass, "getpass", fake_getpass)
+    monkeypatch.setattr(client_module.httpx, "Client", FakeClient)
+    monkeypatch.setattr(client_module, "exchange", fake_exchange)
+
+    client_module.main()
+
+    assert requests == [("POST", "/sessions", "", {"username": "alice", "password": "password1"})]
+    assert password_prompts == ["password: "]
+    assert "Already logged in. Please log out before logging in again." in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
